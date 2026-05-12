@@ -166,6 +166,60 @@ def loop_schedule():
         schedule.run_pending()
         time.sleep(10)
 
+def formatar_hora(entry, label_feedback, config_key):
+    val = entry.get().replace(':', '').strip()
+
+    if val == '':
+        config[config_key] = ''
+        salvar_config(config)
+        iniciar_agendamento_salvo()
+        atualizar_labels_agenda()
+        flash_feedback(label_feedback, "removido", AMARELO)
+        return
+
+    if len(val) == 3:
+        val = '0' + val
+    if len(val) != 4 or not val.isdigit():
+        flash_feedback(label_feedback, "use 4 dígitos: HHMM", VERMELHO)
+        return
+
+    hora = val[:2] + ':' + val[2:]
+    if not validar_hora(hora):
+        flash_feedback(label_feedback, "hora inválida", VERMELHO)
+        return
+
+    entry.delete(0, tk.END)
+    entry.insert(0, hora)
+
+    config[config_key] = hora
+    salvar_config(config)
+    iniciar_agendamento_salvo()
+    atualizar_labels_agenda()
+
+    def criar_na_nuvem():
+        try:
+            from tuya_cloud import criar_timer
+            acao = 'abrir' if config_key == 'abrir' else 'fechar'
+            r = criar_timer(hora, acao)
+            if r.get('success'):
+                flash_feedback(label_feedback, "salvo na nuvem ✓", VERDE)
+            else:
+                flash_feedback(label_feedback, "salvo local (nuvem falhou)", AMARELO)
+        except:
+            flash_feedback(label_feedback, "salvo local", AMARELO)
+
+    threading.Thread(target=criar_na_nuvem).start()
+
+def atualizar_labels_agenda():
+    h_a = config.get('abrir', '')
+    h_f = config.get('fechar', '')
+    label_horario_abrir.config(
+        text=h_a if h_a else 'N/A',
+        fg=TEXTO if h_a else CINZA)
+    label_horario_fechar.config(
+        text=h_f if h_f else 'N/A',
+        fg=TEXTO if h_f else CINZA)
+
 def btn_estilo(parent, texto, cor_bg, cor_fg, cmd):
     return tk.Button(parent, text=texto, command=cmd,
                      bg=cor_bg, fg=cor_fg, activebackground=cor_bg,
@@ -177,19 +231,16 @@ def separador(parent):
 
 
 class HorarioEditavel:
-    """Label que vira Entry ao clicar, volta a Label ao pressionar Enter."""
-
     def __init__(self, parent, config_key, label_feedback):
-        self.config_key    = config_key
+        self.config_key     = config_key
         self.label_feedback = label_feedback
-        self.editando      = False
+        self.editando       = False
 
         self.frame = tk.Frame(parent, bg=BG_CARD)
 
         valor_atual = config.get(config_key, '')
         self.var = tk.StringVar(value=valor_atual)
 
-        # Label (modo visualização)
         cor_inicial = TEXTO if valor_atual else CINZA
         txt_inicial = valor_atual if valor_atual else 'N/A'
         self.label = tk.Label(self.frame, text=txt_inicial,
@@ -198,7 +249,6 @@ class HorarioEditavel:
         self.label.pack(anchor='w')
         self.label.bind('<Button-1>', self._entrar_edicao)
 
-        # Entry (modo edição) — criado mas não exibido
         self.entry = tk.Entry(self.frame, textvariable=self.var,
                               font=('Segoe UI', 16, 'bold'), width=6,
                               bg=BG_ENTRY, fg=TEXTO, insertbackground=TEXTO,
@@ -225,32 +275,10 @@ class HorarioEditavel:
         self.entry.select_range(0, tk.END)
 
     def _salvar(self, event=None):
-        val = self.var.get().replace(':', '').strip()
-
-        if val == '':
-            config[self.config_key] = ''
-            salvar_config(config)
-            iniciar_agendamento_salvo()
-            self._sair_edicao('N/A', CINZA)
-            flash_feedback(self.label_feedback, "removido", AMARELO)
-            return
-
-        if len(val) == 3:
-            val = '0' + val
-        if len(val) != 4 or not val.isdigit():
-            flash_feedback(self.label_feedback, "use HHMM ex: 0530", VERMELHO)
-            return
-
-        hora = val[:2] + ':' + val[2:]
-        if not validar_hora(hora):
-            flash_feedback(self.label_feedback, "hora inválida", VERMELHO)
-            return
-
-        config[self.config_key] = hora
-        salvar_config(config)
-        iniciar_agendamento_salvo()
-        self._sair_edicao(hora, TEXTO)
-        flash_feedback(self.label_feedback, "salvo", VERDE)
+        formatar_hora(self.entry, self.label_feedback, self.config_key)
+        valor = config.get(self.config_key, '')
+        self._sair_edicao(valor if valor else 'N/A',
+                          TEXTO if valor else CINZA)
 
     def _cancelar(self, event=None):
         if not self.editando:
@@ -320,6 +348,9 @@ tk.Label(col_abrir, text="Abrir", font=('Segoe UI', 9),
 label_feedback_abrir = tk.Label(col_abrir, text="", font=('Segoe UI', 8),
                                  bg=BG_CARD, fg=VERDE)
 
+label_horario_abrir = tk.Label(col_abrir, text="", bg=BG_CARD)  # placeholder
+label_horario_abrir.pack_forget()
+
 campo_abrir = HorarioEditavel(col_abrir, 'abrir', label_feedback_abrir)
 campo_abrir.pack(anchor='w', pady=(2, 2))
 label_feedback_abrir.pack(anchor='w')
@@ -333,6 +364,9 @@ tk.Label(col_fechar, text="Fechar", font=('Segoe UI', 9),
 
 label_feedback_fechar = tk.Label(col_fechar, text="", font=('Segoe UI', 8),
                                   bg=BG_CARD, fg=VERDE)
+
+label_horario_fechar = tk.Label(col_fechar, text="", bg=BG_CARD)  # placeholder
+label_horario_fechar.pack_forget()
 
 campo_fechar = HorarioEditavel(col_fechar, 'fechar', label_feedback_fechar)
 campo_fechar.pack(anchor='w', pady=(2, 2))
