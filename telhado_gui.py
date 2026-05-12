@@ -14,7 +14,12 @@ REG_ID  = 'ebea13ea79c3067008wnci'
 REG_IP  = '10.1.3.12'
 REG_KEY = "*w$Fl)a'I7-sfY~8"
 
-SWITCHES = {1: 'Switch 1', 2: 'PC', 3: 'Montagem', 4: 'Switch 4'}
+API_REGION = 'us'
+API_KEY    = 'hqpp79c3etvuapmsm4hn'
+API_SECRET = '4556131a057c4986b80cca760ff631e9'
+
+SWITCHES     = {1: 'Switch 1', 2: 'PC', 3: 'Montagem', 4: 'Switch 4'}
+SWITCH_CODES = {1: 'switch_1', 2: 'switch_2', 3: 'switch_3', 4: 'switch_4'}
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
 
@@ -31,6 +36,16 @@ TEXTO     = '#e2e8f0'
 TEXTO_MUT = '#94a3b8'
 SEPARADOR = '#1e3a5f'
 
+_cloud = None
+_cloud_lock = threading.Lock()
+
+def get_cloud():
+    global _cloud
+    with _cloud_lock:
+        if _cloud is None:
+            _cloud = tinytuya.Cloud(apiRegion=API_REGION, apiKey=API_KEY, apiSecret=API_SECRET)
+        return _cloud
+
 def carregar_config():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r') as f:
@@ -44,40 +59,144 @@ def salvar_config(cfg):
 config = carregar_config()
 
 def conectar_cobertura():
-    d = tinytuya.Device(dev_id=COB_ID, address=COB_IP, local_key=COB_KEY, version=3.4)
-    d.set_socketTimeout(5)
-    return d
+    resultado = [None]
+
+    def tentar_local():
+        try:
+            d = tinytuya.Device(dev_id=COB_ID, address=COB_IP,
+                                local_key=COB_KEY, version=3.4)
+            d.set_socketTimeout(0.5)
+            d.set_retry(False)
+            s = d.status()
+            if 'dps' in s:
+                resultado[0] = (d, 'local')
+        except:
+            pass
+
+    t = threading.Thread(target=tentar_local)
+    t.start()
+    t.join(timeout=1.5)
+
+    if resultado[0]:
+        return resultado[0]
+    return get_cloud(), 'cloud'
+
+def get_status_cobertura(dispositivo, modo):
+    if modo == 'local':
+        s = dispositivo.status()
+        return s.get('dps', {}).get('3', False) if 'dps' in s else None
+    else:
+        s = dispositivo.getstatus(COB_ID)
+        dps = {}
+        if s and 'result' in s:
+            for item in s['result']:
+                dps[item['code']] = item['value']
+        return dps.get('doorcontact_state', None) if dps else None
 
 def conectar_regua():
-    d = tinytuya.Device(dev_id=REG_ID, address=REG_IP, local_key=REG_KEY, version=3.4)
-    d.set_socketTimeout(5)
-    return d
+    resultado = [None]
+
+    def tentar_local():
+        try:
+            d = tinytuya.Device(dev_id=REG_ID, address=REG_IP,
+                                local_key=REG_KEY, version=3.4)
+            d.set_socketTimeout(0.5)
+            d.set_retry(False)
+            s = d.status()
+            if 'dps' in s:
+                resultado[0] = (d, 'local', s['dps'])
+        except:
+            pass
+
+    t = threading.Thread(target=tentar_local)
+    t.start()
+    t.join(timeout=1.5)
+
+    if resultado[0]:
+        return resultado[0]
+
+    c = get_cloud()
+    s = c.getstatus(REG_ID)
+    dps = {}
+    if s and 'result' in s:
+        for item in s['result']:
+            dps[item['code']] = item['value']
+    return c, 'cloud', dps
 
 def acao_cobertura(comando):
     btn_abrir.config(state='disabled')
     btn_fechar.config(state='disabled')
-    label_cob.config(text='...', fg=CINZA)
+    label_cob.config(text='buscando...', fg=CINZA)
 
     def executar():
         try:
-            d = conectar_cobertura()
-            s = d.status()
-            aberta = s.get('dps', {}).get('3', False) if 'dps' in s else None
+            dispositivo, modo = conectar_cobertura()
+            sufixo = ' 📡' if modo == 'cloud' else ''
+            aberta = get_status_cobertura(dispositivo, modo)
+
             if aberta is None:
                 label_cob.config(text='ERRO', fg=VERMELHO)
+
             elif comando == 'status':
-                label_cob.config(text='ABERTA' if aberta else 'FECHADA',
-                                 fg=VERDE if aberta else AZUL)
+                label_cob.config(
+                    text=('ABERTA' if aberta else 'FECHADA') + sufixo,
+                    fg=VERDE if aberta else AZUL)
+
             elif comando == 'abrir':
                 if not aberta:
-                    d.set_value(1, True)
-                label_cob.config(text='ABERTA', fg=VERDE)
+                    if modo == 'local':
+                        dispositivo.set_value(1, True)
+                    else:
+                        dispositivo.sendcommand(COB_ID, {'commands': [{'code': 'switch_1', 'value': True}]})
+                label_cob.config(text='ABERTA' + sufixo, fg=VERDE)
+
+                def verificar():
+                    time.sleep(12)
+                    try:
+                        d2, m2 = conectar_cobertura()
+                        aberta2 = get_status_cobertura(d2, m2)
+                        if aberta2 is None:
+                            return
+                        s2 = ' 📡' if m2 == 'cloud' else ''
+                        label_cob.config(
+                            text=('ABERTA' if aberta2 else 'FECHADA') + s2,
+                            fg=VERDE if aberta2 else AZUL)
+                    except:
+                        pass
+                threading.Thread(target=verificar, daemon=True).start()
+
             elif comando == 'fechar':
                 if aberta:
-                    d.set_value(1, False)
-                label_cob.config(text='FECHADA', fg=AZUL)
+                    if modo == 'local':
+                        dispositivo.set_value(1, False)
+                    else:
+                        dispositivo.sendcommand(COB_ID, {'commands': [{'code': 'switch_1', 'value': False}]})
+                label_cob.config(text='FECHADA' + sufixo, fg=AZUL)
+
+                def verificar():
+                    time.sleep(12)
+                    try:
+                        d2, m2 = conectar_cobertura()
+                        aberta2 = get_status_cobertura(d2, m2)
+                        if aberta2 is None:
+                            return
+                        if aberta2:
+                            time.sleep(8)
+                            d3, m3 = conectar_cobertura()
+                            aberta2 = get_status_cobertura(d3, m3)
+                            if aberta2 is None:
+                                return
+                        s2 = ' 📡' if m2 == 'cloud' else ''
+                        label_cob.config(
+                            text=('ABERTA' if aberta2 else 'FECHADA') + s2,
+                            fg=VERDE if aberta2 else AZUL)
+                    except:
+                        pass
+                threading.Thread(target=verificar, daemon=True).start()
+
         except:
             label_cob.config(text='ERRO', fg=VERMELHO)
+
         btn_abrir.config(state='normal')
         btn_fechar.config(state='normal')
 
@@ -85,22 +204,26 @@ def acao_cobertura(comando):
 
 def abrir_agendado():
     try:
-        d = conectar_cobertura()
-        s = d.status()
-        aberta = s.get('dps', {}).get('3', False) if 'dps' in s else None
-        if aberta is False:
-            d.set_value(1, True)
+        dispositivo, modo = conectar_cobertura()
+        aberta = get_status_cobertura(dispositivo, modo)
+        if not aberta:
+            if modo == 'local':
+                dispositivo.set_value(1, True)
+            else:
+                dispositivo.sendcommand(COB_ID, {'commands': [{'code': 'switch_1', 'value': True}]})
         label_cob.config(text='ABERTA', fg=VERDE)
     except:
         pass
 
 def fechar_agendado():
     try:
-        d = conectar_cobertura()
-        s = d.status()
-        aberta = s.get('dps', {}).get('3', False) if 'dps' in s else None
-        if aberta is True:
-            d.set_value(1, False)
+        dispositivo, modo = conectar_cobertura()
+        aberta = get_status_cobertura(dispositivo, modo)
+        if aberta:
+            if modo == 'local':
+                dispositivo.set_value(1, False)
+            else:
+                dispositivo.sendcommand(COB_ID, {'commands': [{'code': 'switch_1', 'value': False}]})
         label_cob.config(text='FECHADA', fg=AZUL)
     except:
         pass
@@ -112,20 +235,27 @@ def acao_regua(switch_num, comando):
 
     def executar():
         try:
-            d = conectar_regua()
-            s = d.status()
-            dps = s.get('dps', {}) if 'dps' in s else {}
-            ligado = dps.get(str(switch_num), False)
+            dispositivo, modo, dps = conectar_regua()
+            sufixo = ' 📡' if modo == 'cloud' else ''
+            code = SWITCH_CODES[switch_num]
+
             if comando == 'status':
+                ligado = dps.get(str(switch_num), False) if modo == 'local' else dps.get(code, False)
                 labels_regua[switch_num].config(
-                    text='ON' if ligado else 'OFF',
+                    text=('ON' if ligado else 'OFF') + sufixo,
                     fg=VERDE if ligado else CINZA)
             elif comando == 'ligar':
-                d.set_value(switch_num, True)
-                labels_regua[switch_num].config(text='ON', fg=VERDE)
+                if modo == 'local':
+                    dispositivo.set_value(switch_num, True)
+                else:
+                    dispositivo.sendcommand(REG_ID, {'commands': [{'code': code, 'value': True}]})
+                labels_regua[switch_num].config(text='ON' + sufixo, fg=VERDE)
             elif comando == 'desligar':
-                d.set_value(switch_num, False)
-                labels_regua[switch_num].config(text='OFF', fg=CINZA)
+                if modo == 'local':
+                    dispositivo.set_value(switch_num, False)
+                else:
+                    dispositivo.sendcommand(REG_ID, {'commands': [{'code': code, 'value': False}]})
+                labels_regua[switch_num].config(text='OFF' + sufixo, fg=CINZA)
         except:
             labels_regua[switch_num].config(text='ERRO', fg=VERMELHO)
         if comando in botoes_regua[switch_num]:
@@ -173,7 +303,6 @@ def formatar_hora(entry, label_feedback, config_key):
         config[config_key] = ''
         salvar_config(config)
         iniciar_agendamento_salvo()
-        atualizar_labels_agenda()
         flash_feedback(label_feedback, "removido", AMARELO)
         return
 
@@ -194,7 +323,6 @@ def formatar_hora(entry, label_feedback, config_key):
     config[config_key] = hora
     salvar_config(config)
     iniciar_agendamento_salvo()
-    atualizar_labels_agenda()
 
     def criar_na_nuvem():
         try:
@@ -209,16 +337,6 @@ def formatar_hora(entry, label_feedback, config_key):
             flash_feedback(label_feedback, "salvo local", AMARELO)
 
     threading.Thread(target=criar_na_nuvem).start()
-
-def atualizar_labels_agenda():
-    h_a = config.get('abrir', '')
-    h_f = config.get('fechar', '')
-    label_horario_abrir.config(
-        text=h_a if h_a else 'N/A',
-        fg=TEXTO if h_a else CINZA)
-    label_horario_fechar.config(
-        text=h_f if h_f else 'N/A',
-        fg=TEXTO if h_f else CINZA)
 
 def btn_estilo(parent, texto, cor_bg, cor_fg, cmd):
     return tk.Button(parent, text=texto, command=cmd,
@@ -235,17 +353,16 @@ class HorarioEditavel:
         self.config_key     = config_key
         self.label_feedback = label_feedback
         self.editando       = False
-
-        self.frame = tk.Frame(parent, bg=BG_CARD)
+        self.frame          = tk.Frame(parent, bg=BG_CARD)
 
         valor_atual = config.get(config_key, '')
-        self.var = tk.StringVar(value=valor_atual)
+        self.var    = tk.StringVar(value=valor_atual)
 
         cor_inicial = TEXTO if valor_atual else CINZA
         txt_inicial = valor_atual if valor_atual else 'N/A'
-        self.label = tk.Label(self.frame, text=txt_inicial,
-                              font=('Segoe UI', 16, 'bold'),
-                              bg=BG_CARD, fg=cor_inicial, cursor='hand2')
+        self.label  = tk.Label(self.frame, text=txt_inicial,
+                               font=('Segoe UI', 16, 'bold'),
+                               bg=BG_CARD, fg=cor_inicial, cursor='hand2')
         self.label.pack(anchor='w')
         self.label.bind('<Button-1>', self._entrar_edicao)
 
@@ -267,8 +384,7 @@ class HorarioEditavel:
         if self.editando:
             return
         self.editando = True
-        valor = config.get(self.config_key, '')
-        self.var.set(valor)
+        self.var.set(config.get(self.config_key, ''))
         self.label.pack_forget()
         self.entry.pack(anchor='w')
         self.entry.focus_set()
@@ -277,15 +393,13 @@ class HorarioEditavel:
     def _salvar(self, event=None):
         formatar_hora(self.entry, self.label_feedback, self.config_key)
         valor = config.get(self.config_key, '')
-        self._sair_edicao(valor if valor else 'N/A',
-                          TEXTO if valor else CINZA)
+        self._sair_edicao(valor if valor else 'N/A', TEXTO if valor else CINZA)
 
     def _cancelar(self, event=None):
         if not self.editando:
             return
         valor = config.get(self.config_key, '')
-        self._sair_edicao(valor if valor else 'N/A',
-                          TEXTO if valor else CINZA)
+        self._sair_edicao(valor if valor else 'N/A', TEXTO if valor else CINZA)
 
     def _sair_edicao(self, texto, cor):
         self.editando = False
@@ -301,13 +415,11 @@ janela.configure(bg=BG)
 janela.geometry("420x640")
 janela.resizable(False, False)
 
-# Título
 tk.Label(janela, text="🔭  Pier 1", font=('Segoe UI', 15, 'bold'),
          bg=BG, fg=TEXTO).pack(pady=(18, 2))
 tk.Label(janela, text="Observatório Munhoz", font=('Segoe UI', 10),
          bg=BG, fg=TEXTO_MUT).pack(pady=(0, 14))
 
-# --- Card Cobertura + Agendamento ---
 card_cob = tk.Frame(janela, bg=BG_CARD, bd=0,
                     highlightthickness=1, highlightbackground=BG_BTN)
 card_cob.pack(fill='x', padx=20, pady=(0, 12))
@@ -338,7 +450,6 @@ tk.Label(card_cob, text="AGENDAMENTO", font=('Segoe UI', 9, 'bold'),
 frame_ag = tk.Frame(card_cob, bg=BG_CARD)
 frame_ag.pack(padx=16, fill='x')
 
-# Coluna Abrir
 col_abrir = tk.Frame(frame_ag, bg=BG_CARD)
 col_abrir.pack(side='left', padx=(0, 50))
 
@@ -347,15 +458,10 @@ tk.Label(col_abrir, text="Abrir", font=('Segoe UI', 9),
 
 label_feedback_abrir = tk.Label(col_abrir, text="", font=('Segoe UI', 8),
                                  bg=BG_CARD, fg=VERDE)
-
-label_horario_abrir = tk.Label(col_abrir, text="", bg=BG_CARD)  # placeholder
-label_horario_abrir.pack_forget()
-
 campo_abrir = HorarioEditavel(col_abrir, 'abrir', label_feedback_abrir)
 campo_abrir.pack(anchor='w', pady=(2, 2))
 label_feedback_abrir.pack(anchor='w')
 
-# Coluna Fechar
 col_fechar = tk.Frame(frame_ag, bg=BG_CARD)
 col_fechar.pack(side='left')
 
@@ -364,10 +470,6 @@ tk.Label(col_fechar, text="Fechar", font=('Segoe UI', 9),
 
 label_feedback_fechar = tk.Label(col_fechar, text="", font=('Segoe UI', 8),
                                   bg=BG_CARD, fg=VERDE)
-
-label_horario_fechar = tk.Label(col_fechar, text="", bg=BG_CARD)  # placeholder
-label_horario_fechar.pack_forget()
-
 campo_fechar = HorarioEditavel(col_fechar, 'fechar', label_feedback_fechar)
 campo_fechar.pack(anchor='w', pady=(2, 2))
 label_feedback_fechar.pack(anchor='w')
@@ -376,7 +478,6 @@ tk.Label(card_cob, text="Clique no horário para editar  ·  Enter para salvar",
          font=('Segoe UI', 8), bg=BG_CARD, fg=CINZA).pack(
          anchor='w', padx=16, pady=(8, 14))
 
-# --- Card Régua ---
 card_reg = tk.Frame(janela, bg=BG_CARD, bd=0,
                     highlightthickness=1, highlightbackground=BG_BTN)
 card_reg.pack(fill='x', padx=20, pady=(0, 12))
@@ -411,7 +512,8 @@ for sw, nome in SWITCHES.items():
 
 tk.Frame(card_reg, bg=BG_CARD, height=10).pack()
 
-# Inicia
+threading.Thread(target=get_cloud, daemon=True).start()
+
 iniciar_agendamento_salvo()
 threading.Thread(target=loop_schedule, daemon=True).start()
 
