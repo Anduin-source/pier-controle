@@ -93,6 +93,16 @@ def get_status_cobertura(dispositivo, modo):
                 dps[item['code']] = item['value']
         return dps.get('doorcontact_state', None) if dps else None
 
+def atualizar_label_cobertura(aberta, modo):
+    """Única função que escreve no label da cobertura — fonte de verdade."""
+    sufixo = ' 📡' if modo == 'cloud' else ''
+    if aberta is None:
+        label_cob.config(text='ERRO', fg=VERMELHO)
+    else:
+        label_cob.config(
+            text=('ABERTA' if aberta else 'FECHADA') + sufixo,
+            fg=VERDE if aberta else AZUL)
+
 def conectar_regua():
     resultado = [None]
 
@@ -123,84 +133,95 @@ def conectar_regua():
             dps[item['code']] = item['value']
     return c, 'cloud', dps
 
+# ---------------------------------------------------------------------------
+# Ações da cobertura
+# ---------------------------------------------------------------------------
+
 def acao_cobertura(comando):
+    """
+    Executa status, abrir ou fechar.
+    - Label só é atualizado após confirmação real do dispositivo.
+    - Não há update otimista: o estado exibido reflete sempre o estado lido.
+    """
     btn_abrir.config(state='disabled')
     btn_fechar.config(state='disabled')
+    btn_atualizar.config(state='disabled')
     label_cob.config(text='buscando...', fg=CINZA)
 
     def executar():
         try:
             dispositivo, modo = conectar_cobertura()
-            sufixo = ' 📡' if modo == 'cloud' else ''
             aberta = get_status_cobertura(dispositivo, modo)
+            sufixo = ' 📡' if modo == 'cloud' else ''
 
-            if aberta is None:
-                label_cob.config(text='ERRO', fg=VERMELHO)
-
-            elif comando == 'status':
-                label_cob.config(
-                    text=('ABERTA' if aberta else 'FECHADA') + sufixo,
-                    fg=VERDE if aberta else AZUL)
+            if comando == 'status':
+                # Lê e exibe — sem efeito colateral
+                janela.after(0, lambda: atualizar_label_cobertura(aberta, modo))
 
             elif comando == 'abrir':
-                if not aberta:
-                    if modo == 'local':
-                        dispositivo.set_value(1, True)
-                    else:
-                        dispositivo.sendcommand(COB_ID, {'commands': [{'code': 'switch_1', 'value': True}]})
-                label_cob.config(text='ABERTA' + sufixo, fg=VERDE)
+                if aberta is None:
+                    janela.after(0, lambda: atualizar_label_cobertura(None, modo))
+                else:
+                    if aberta is False:
+                        # Só aciona o motor se confirmadamente fechado
+                        if modo == 'local':
+                            dispositivo.set_value(1, True)
+                        else:
+                            dispositivo.sendcommand(COB_ID, {'commands': [{'code': 'switch_1', 'value': True}]})
+                    # Se já estava aberta: não reenvia, mas confirma abaixo
 
-                def verificar():
-                    time.sleep(12)
-                    try:
-                        d2, m2 = conectar_cobertura()
-                        aberta2 = get_status_cobertura(d2, m2)
-                        if aberta2 is None:
-                            return
-                        s2 = ' 📡' if m2 == 'cloud' else ''
-                        label_cob.config(
-                            text=('ABERTA' if aberta2 else 'FECHADA') + s2,
-                            fg=VERDE if aberta2 else AZUL)
-                    except:
-                        pass
-                threading.Thread(target=verificar, daemon=True).start()
+                    janela.after(0, lambda: label_cob.config(
+                        text='abrindo...' + sufixo, fg=AMARELO))
+
+                    def verificar_abrir():
+                        time.sleep(12)
+                        try:
+                            d2, m2 = conectar_cobertura()
+                            aberta2 = get_status_cobertura(d2, m2)
+                            janela.after(0, lambda: atualizar_label_cobertura(aberta2, m2))
+                        except:
+                            pass
+                    threading.Thread(target=verificar_abrir, daemon=True).start()
 
             elif comando == 'fechar':
-                if aberta:
-                    if modo == 'local':
-                        dispositivo.set_value(1, False)
-                    else:
-                        dispositivo.sendcommand(COB_ID, {'commands': [{'code': 'switch_1', 'value': False}]})
-                label_cob.config(text='FECHADA' + sufixo, fg=AZUL)
+                if aberta is None:
+                    janela.after(0, lambda: atualizar_label_cobertura(None, modo))
+                else:
+                    if aberta is True:
+                        # Só aciona o motor se confirmadamente aberto
+                        if modo == 'local':
+                            dispositivo.set_value(1, False)
+                        else:
+                            dispositivo.sendcommand(COB_ID, {'commands': [{'code': 'switch_1', 'value': False}]})
+                    # Se já estava fechada: não reenvia, mas confirma abaixo
 
-                def verificar():
-                    time.sleep(12)
-                    try:
-                        d2, m2 = conectar_cobertura()
-                        aberta2 = get_status_cobertura(d2, m2)
-                        if aberta2 is None:
-                            return
-                        if aberta2:
-                            time.sleep(8)
-                            d3, m3 = conectar_cobertura()
-                            aberta2 = get_status_cobertura(d3, m3)
-                            if aberta2 is None:
-                                return
-                        s2 = ' 📡' if m2 == 'cloud' else ''
-                        label_cob.config(
-                            text=('ABERTA' if aberta2 else 'FECHADA') + s2,
-                            fg=VERDE if aberta2 else AZUL)
-                    except:
-                        pass
-                threading.Thread(target=verificar, daemon=True).start()
+                    janela.after(0, lambda: label_cob.config(
+                        text='fechando...' + sufixo, fg=AMARELO))
+
+                    def verificar_fechar():
+                        time.sleep(12)
+                        try:
+                            d2, m2 = conectar_cobertura()
+                            aberta2 = get_status_cobertura(d2, m2)
+                            # Segunda tentativa se motor ainda não terminou
+                            if aberta2 is True:
+                                time.sleep(8)
+                                d3, m3 = conectar_cobertura()
+                                aberta2 = get_status_cobertura(d3, m3)
+                                m2 = m3
+                            janela.after(0, lambda: atualizar_label_cobertura(aberta2, m2))
+                        except:
+                            pass
+                    threading.Thread(target=verificar_fechar, daemon=True).start()
 
         except:
-            label_cob.config(text='ERRO', fg=VERMELHO)
+            janela.after(0, lambda: label_cob.config(text='ERRO', fg=VERMELHO))
 
-        btn_abrir.config(state='normal')
-        btn_fechar.config(state='normal')
+        janela.after(0, lambda: btn_abrir.config(state='normal'))
+        janela.after(0, lambda: btn_fechar.config(state='normal'))
+        janela.after(0, lambda: btn_atualizar.config(state='normal'))
 
-    threading.Thread(target=executar).start()
+    threading.Thread(target=executar, daemon=True).start()
 
 def abrir_agendado():
     try:
@@ -211,7 +232,7 @@ def abrir_agendado():
                 dispositivo.set_value(1, True)
             else:
                 dispositivo.sendcommand(COB_ID, {'commands': [{'code': 'switch_1', 'value': True}]})
-        label_cob.config(text='ABERTA', fg=VERDE)
+        janela.after(0, lambda: label_cob.config(text='ABERTA', fg=VERDE))
     except:
         pass
 
@@ -224,7 +245,7 @@ def fechar_agendado():
                 dispositivo.set_value(1, False)
             else:
                 dispositivo.sendcommand(COB_ID, {'commands': [{'code': 'switch_1', 'value': False}]})
-        label_cob.config(text='FECHADA', fg=AZUL)
+        janela.after(0, lambda: label_cob.config(text='FECHADA', fg=AZUL))
     except:
         pass
 
@@ -261,7 +282,7 @@ def acao_regua(switch_num, comando):
         if comando in botoes_regua[switch_num]:
             botoes_regua[switch_num][comando].config(state='normal')
 
-    threading.Thread(target=executar).start()
+    threading.Thread(target=executar, daemon=True).start()
 
 def status_todos_regua():
     for sw in SWITCHES:
@@ -286,10 +307,10 @@ def iniciar_agendamento_salvo():
     h_fechar = config.get('fechar', '')
     if h_abrir:
         schedule.every().day.at(h_abrir).do(
-            lambda: threading.Thread(target=abrir_agendado).start())
+            lambda: threading.Thread(target=abrir_agendado, daemon=True).start())
     if h_fechar:
         schedule.every().day.at(h_fechar).do(
-            lambda: threading.Thread(target=fechar_agendado).start())
+            lambda: threading.Thread(target=fechar_agendado, daemon=True).start())
 
 def loop_schedule():
     while True:
@@ -336,7 +357,7 @@ def formatar_hora(entry, label_feedback, config_key):
         except:
             flash_feedback(label_feedback, "salvo local", AMARELO)
 
-    threading.Thread(target=criar_na_nuvem).start()
+    threading.Thread(target=criar_na_nuvem, daemon=True).start()
 
 def btn_estilo(parent, texto, cor_bg, cor_fg, cmd):
     return tk.Button(parent, text=texto, command=cmd,
@@ -408,11 +429,14 @@ class HorarioEditavel:
         self.label.pack(anchor='w')
 
 
-# --- Interface ---
+# ---------------------------------------------------------------------------
+# Interface
+# ---------------------------------------------------------------------------
+
 janela = tk.Tk()
 janela.title("Pier 1 — Controle")
 janela.configure(bg=BG)
-janela.geometry("420x640")
+janela.geometry("420x660")
 janela.resizable(False, False)
 
 tk.Label(janela, text="🔭  Pier 1", font=('Segoe UI', 15, 'bold'),
@@ -432,15 +456,23 @@ label_cob = tk.Label(card_cob, text="---", font=('Segoe UI', 24, 'bold'),
 label_cob.pack(pady=(4, 8))
 
 frame_btn_cob = tk.Frame(card_cob, bg=BG_CARD)
-frame_btn_cob.pack(pady=(0, 10))
+frame_btn_cob.pack(pady=(0, 6))
 
 btn_abrir = btn_estilo(frame_btn_cob, "Abrir", '#166534', VERDE,
                        lambda: acao_cobertura('abrir'))
-btn_abrir.grid(row=0, column=0, padx=8)
+btn_abrir.grid(row=0, column=0, padx=6)
 
 btn_fechar = btn_estilo(frame_btn_cob, "Fechar", '#1e3a5f', AZUL,
                         lambda: acao_cobertura('fechar'))
-btn_fechar.grid(row=0, column=1, padx=8)
+btn_fechar.grid(row=0, column=1, padx=6)
+
+# Botão para sincronizar o status com o estado real do dispositivo
+btn_atualizar = btn_estilo(frame_btn_cob, "↺", '#2a2a2a', TEXTO_MUT,
+                           lambda: acao_cobertura('status'))
+btn_atualizar.grid(row=0, column=2, padx=6)
+
+tk.Label(card_cob, text="↺  sincroniza o status com o dispositivo",
+         font=('Segoe UI', 7), bg=BG_CARD, fg=CINZA).pack(pady=(2, 6))
 
 separador(card_cob)
 
@@ -511,6 +543,10 @@ for sw, nome in SWITCHES.items():
     botoes_regua[sw] = {'ligar': btn_on, 'desligar': btn_off}
 
 tk.Frame(card_reg, bg=BG_CARD, height=10).pack()
+
+# ---------------------------------------------------------------------------
+# Inicialização
+# ---------------------------------------------------------------------------
 
 threading.Thread(target=get_cloud, daemon=True).start()
 
