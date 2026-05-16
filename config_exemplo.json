@@ -1,0 +1,28 @@
+{
+  "cobertura": {
+    "id":  "SEU_DEVICE_ID_AQUI",
+    "ip":  "192.168.x.x",
+    "key": "SUA_LOCAL_KEY_AQUI"
+  },
+  "regua": {
+    "id":  "SEU_DEVICE_ID_AQUI",
+    "ip":  "192.168.x.x",
+    "key": "SUA_LOCAL_KEY_AQUI",
+    "switches": {
+      "1": "Switch 1",
+      "2": "PC",
+      "3": "Montagem",
+      "4": "Switch 4"
+    }
+  },
+  "tuya_cloud": {
+    "region":     "us",
+    "api_key":    "SEU_API_KEY_AQUI",
+    "api_secret": "SEU_API_SECRET_AQUI",
+    "timezone":   "America/Sao_Paulo"
+  },
+  "agendamento": {
+    "abrir":  "",
+    "fechar": "05:00"
+  }
+}

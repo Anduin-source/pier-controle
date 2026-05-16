@@ -1,10 +1,33 @@
 import tinytuya
+import json
+import os
+import sys
 
-API_REGION = 'us'
-API_KEY    = 'cdmapnmpr99qu9k4fxsp'
-API_SECRET = '65fc894d3db1434a95877c9019db040d'
-COB_ID     = 'eb73c49f845500b95bvc9n'
-TIMEZONE   = 'America/Sao_Paulo'
+# ---------------------------------------------------------------------------
+# Configuração — lida de config.json (não versionado)
+# ---------------------------------------------------------------------------
+
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+
+def carregar_config():
+    if not os.path.exists(CONFIG_FILE):
+        print("ERRO: config.json não encontrado.")
+        print("Copie config.exemplo.json para config.json e preencha suas credenciais.")
+        sys.exit(1)
+    with open(CONFIG_FILE, 'r') as f:
+        return json.load(f)
+
+cfg = carregar_config()
+
+API_REGION = cfg['tuya_cloud']['region']
+API_KEY    = cfg['tuya_cloud']['api_key']
+API_SECRET = cfg['tuya_cloud']['api_secret']
+COB_ID     = cfg['cobertura']['id']
+TIMEZONE   = cfg['tuya_cloud'].get('timezone', 'America/Sao_Paulo')
+
+# ---------------------------------------------------------------------------
+# Funções
+# ---------------------------------------------------------------------------
 
 def conectar_cloud():
     return tinytuya.Cloud(
@@ -26,25 +49,27 @@ def deletar_todos_timers():
 
 def criar_timer(hora_str, acao):
     """
-    hora_str: 'HH:MM'
-    acao: 'abrir' ou 'fechar'
+    hora_str : 'HH:MM'
+    acao     : 'abrir' ou 'fechar'
     """
     valor = True if acao == 'abrir' else False
-    c = conectar_cloud()
-    body = {
-        'time': hora_str,
-        'loops': '1111111',
+    c     = conectar_cloud()
+    body  = {
+        'time':        hora_str,
+        'loops':       '1111111',
         'timezone_id': TIMEZONE,
-        'functions': [
-            {'code': 'switch_1', 'value': valor}
-        ],
-        'alias_name': f'pier1_{acao}'
+        'functions':   [{'code': 'switch_1', 'value': valor}],
+        'alias_name':  f'pier1_{acao}'
     }
     return c.cloudrequest(
         f'/v2.0/cloud/timer/device/{COB_ID}',
         action='POST',
         post=body
     )
+
+# ---------------------------------------------------------------------------
+# Teste rápido
+# ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
     print("Testando API Cloud Tuya...")

@@ -1,4 +1,14 @@
+# Credenciais e configuração local — nunca versionar
 config.json
 devices.json
+
+# Logs e temporários Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.log
+
+# Ambientes virtuais
+venv/
+.venv/
+env/
