@@ -27,6 +27,48 @@ Implicações do modo cloud: requer internet ativa, latência maior (~2-3s), dep
 pip install tinytuya flask schedule
 ```
 
+## Pré-requisitos — Conta Tuya Developer
+
+Este sistema se comunica com os dispositivos via API Tuya. Antes de qualquer configuração,
+é necessário ter uma conta de desenvolvedor ativa e vinculada ao app do celular.
+**Sem isso, o wizard não encontra nenhum dispositivo.**
+
+### Passo a passo
+
+**1. Parear os dispositivos no app**
+
+Instale o app **Smart Life** ou **Tuya Smart** no celular e adicione todos os dispositivos
+(cobertura, régua, etc.) normalmente pelo app. Eles precisam estar funcionando pelo app antes de continuar.
+
+**2. Criar conta de desenvolvedor**
+
+Acesse [iot.tuya.com](https://iot.tuya.com) e crie uma conta gratuita.
+Quando perguntar o tipo de conta, escolha **Skip** (pular o wizard de empresa).
+
+**3. Criar um projeto Cloud**
+
+- Vá em **Cloud → Development → Create Cloud Project**
+- Escolha um nome qualquer
+- Em **Data Center**, selecione a região correspondente à sua conta do app:
+  - Brasil → geralmente **Western America** (`us`) ou **Central Europe** (`eu`)
+  - Dica: tente `us` primeiro; se o wizard não encontrar dispositivos, tente `eu`
+- Em APIs, habilite pelo menos: **Device Status Notification**, **Authorization** e **Smart Home Scene Linkage**
+
+**4. Linkar a conta do app ao projeto** ← *etapa mais importante*
+
+- Dentro do projeto, vá em **Devices → Link Tuya App Account**
+- Clique em **Add App Account**
+- Escaneie o QR code com o app Smart Life/Tuya Smart
+- Após vincular, seus dispositivos aparecem na aba **All Devices**
+
+**5. Anotar as credenciais**
+
+Na página **Overview** do projeto, copie:
+- **Access ID** → será o `api_key` no config.json
+- **Access Secret** → será o `api_secret` no config.json
+
+Agora você está pronto para rodar o wizard e configurar o sistema.
+
 ## Configuração inicial
 
 ### 1. Obter as credenciais dos dispositivos
