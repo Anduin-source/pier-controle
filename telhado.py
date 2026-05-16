@@ -1,9 +1,15 @@
 import tinytuya
 import sys
+import json
+import os
 
-DEVICE_ID = 'eb73c49f845500b95bvc9n'
-IP_LOCAL  = '10.1.3.19'
-LOCAL_KEY = 'QaWZ_t$!=d1GRJO]'
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+with open(CONFIG_FILE, 'r') as f:
+    _cfg = json.load(f)
+
+DEVICE_ID = _cfg['cobertura']['id']
+IP_LOCAL  = _cfg['cobertura']['ip']
+LOCAL_KEY = _cfg['cobertura']['key']
 VERSION   = 3.4
 
 def conectar():
